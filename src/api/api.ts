@@ -346,6 +346,8 @@ export type GeneratedLicenseData = {
     exceptions: Exceptions
 }
 
+export { Licenses, Exceptions }
+
 /**
  * Create or update the license data files and return the generated license data.
  *

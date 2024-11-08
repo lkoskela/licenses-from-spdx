@@ -1,2 +1,3 @@
 import { generateLicenseData, GeneratedLicenseData } from './api/api'
-export { generateLicenseData, GeneratedLicenseData }
+import { Licenses, License, Exceptions, Exception } from './types'
+export { generateLicenseData, GeneratedLicenseData, Licenses, License, Exceptions, Exception }
