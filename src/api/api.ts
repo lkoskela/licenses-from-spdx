@@ -227,7 +227,6 @@ const downloadManyJSONFiles = async (arrayOfURLs: string[]): Promise<any[]> => {
     const results: any[] = []
     for (let b = 0; b < batches.length; b++) {
         const batch = batches[b]
-        console.log(`Downloading batch ${b+1} (${batch.length} entries)`)
         const batchResults = await Promise.all(batch.map(downloadJSON))
         batchResults.forEach(result => results.push(result))
     }
@@ -280,8 +279,8 @@ const updateLicenseFileAt = async (destinationFilePath: string) => {
                 name: license.name,
                 licenseId: license.licenseId,
                 licenseText: license.licenseText,
-                isDeprecated: license.isDeprecatedLicenseId,
-                //standardLicenseTemplate: license.standardLicenseTemplate
+                isDeprecated: !!license.isDeprecatedLicenseId,
+                seeAlso: license.seeAlso || [],
             }
         }
         return undefined

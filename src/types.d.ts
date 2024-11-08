@@ -10,6 +10,7 @@ export type License = {
     licenseId: string,
     licenseText: string,
     isDeprecated: boolean,
+    seeAlso: string[],
 }
 
 export type Licenses = {
