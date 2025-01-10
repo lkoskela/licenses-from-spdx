@@ -293,7 +293,18 @@ const updateLicenseFileAt = async (destinationFilePath: string) => {
 }
 
 const updateExceptionsFileAt = async (exceptionsFilePath: string, licensesFilePath: string) => {
-    const exceptionDetailsUrlMapper = (entry: any) => EXCEPTION_DETAILS_FILE_BASEURL + entry.reference.replace(/^.\//, '')
+    const exceptionDetailsUrlMapper = (entry: any) => {
+        if ((entry.detailsUrl?.startsWith('https://') || entry.detailsUrl?.startsWith('http://')) && entry.detailsUrl?.endsWith('.json')) {
+            return entry.detailsUrl
+        } else if (entry.licenseExceptionId) {
+            return EXCEPTION_DETAILS_FILE_BASEURL + entry.licenseExceptionId + '.json'
+        } else if (entry.reference?.startsWith('/')) {
+            const base = EXCEPTION_DETAILS_FILE_BASEURL + entry.reference.replace(/^.\//, '')
+            const suffix = base.endsWith('.json') ? '' : '.json'
+            return base + suffix
+        }
+        throw new Error(`Unexpected entry object for updateExceptionsFileAt/exceptionDetailsUrlMapper: ${JSON.stringify(entry, null, 2)}`)
+    }
     const exceptionDetailsObjectMapper = (_licenses: any[]) => {
         return (entry: any) => {
             return {
