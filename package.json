@@ -1,6 +1,6 @@
 {
   "name": "licenses-from-spdx",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Fetch the list of open source licenses from spdx.org",
   "devDependencies": {
     "@babel/preset-typescript": "^7.16.0",
