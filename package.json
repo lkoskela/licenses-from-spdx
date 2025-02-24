@@ -16,7 +16,7 @@
     "typescript": "^5.4.2"
   },
   "dependencies": {
-    "fast-xml-parser": "^4.5.0"
+    "fast-xml-parser": "^5.0.6"
   },
   "compilerOptions": {
     "module": "commonJs",
