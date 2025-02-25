@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
+import { tmpdir } from 'os'
 import { parseArgs } from 'node:util'
-import { fileSync } from 'tmp'
 import { join, dirname } from 'path'
 
 import { generateLicenseData, GeneratedLicenseData } from '../api/api'
@@ -15,11 +15,7 @@ export type UpdateLicenseDataParams = {
 
 const resolveOutputPath = (path: string | undefined, defaultDirectory: string|undefined, defaultFilename: string) => {
     if (path === undefined) {
-        if (defaultDirectory) {
-            return join(defaultDirectory, defaultFilename)
-        } else {
-            return fileSync({ postfix: defaultFilename }).name
-        }
+        return join(defaultDirectory || tmpdir(), defaultFilename)
     }
     if (isFile(path)) {
         return path
