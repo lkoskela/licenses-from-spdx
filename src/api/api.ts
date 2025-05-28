@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, createWriteStream, existsSync, statSync, m
 import { tmpdir } from 'os'
 import { Exceptions, Licenses } from '../types'
 import { readFileAsString, fileIsOlderThan, fileIsValidJson } from '../utils/file-utils'
+import { convertSpdxXmlToJsonObject } from '../rdf/rdf'
 
 
 const LICENSE_FILE_URL = "https://raw.githubusercontent.com/spdx/license-list-data/master/json/licenses.json"
@@ -28,14 +29,14 @@ const attemptXmlRdfFallback = async (url: string): Promise<any> => {
         let xmlUrl = `https://raw.githubusercontent.com/spdx/license-list-data/main/rdfxml/${licenseId}.rdf`
         try {
             let xmlDoc = await downloadXML(xmlUrl, false)
-            console.debug(`Error parsing JSON from ${url} but found an XML fallback from ${xmlUrl}`)
-            return convertLicenseXmlToJsonObject(xmlDoc)
+            console.debug(`Found ${xmlUrl} as fallback for ${url}`)
+            return convertSpdxXmlToJsonObject(xmlDoc, licenseId)
         } catch (err: any) {
-            console.debug(`Could not find ${xmlUrl} either as a fallback for ${url} either: ${err}`, err.stack)
-            throw err
+            console.debug(`Could not find XML/RDF fallback for ${url} at ${xmlUrl}: ${err}`, err.stack)
+            return Promise.reject(`Could not find ${xmlUrl} either as a fallback for ${url}`)
         }
     }
-    return Promise.reject()
+    return Promise.reject(`Don't know where to look for an XML/RDF fallback for ${url}`)
 }
 
 const downloadJSON = async (url: string): Promise<any> => {
@@ -96,121 +97,6 @@ const downloadXML = async (url: string, preserveOrder: boolean = true): Promise<
             details: `Raw content received:\n${rawXml}`
         })
     }
-}
-
-type NamespaceMappings = {
-    [name: string]: string
-}
-
-type Namespaces = {
-    byUri(uri: string): string
-}
-
-const parseNamespaces = (mappings: NamespaceMappings|undefined): Namespaces => {
-    const keyedByPrefix: { [name:string]: string } = {}
-    const keyedByURI: { [name:string]: string } = {}
-    if (mappings) {
-        Object.keys(mappings).forEach(ns => {
-            let prefix = ns.replace(/^xmlns:/, '')
-            let uri = mappings[ns]
-            keyedByPrefix[prefix] = uri
-            keyedByURI[uri] = prefix
-        })
-    }
-    const byUri = (uri: string): string => { return keyedByURI[uri] || '' }
-    return { byUri }
-}
-
-const convertLicenseXmlToJsonObject = (doc: any): any => {
-    let root = doc[Object.keys(doc)[0]]
-    let namespaces = parseNamespaces(root["@"])
-    let nsRdf = namespaces.byUri('http://www.w3.org/1999/02/22-rdf-syntax-ns#')
-    let nsSpdx = namespaces.byUri('http://spdx.org/rdf/terms#')
-    let nsRdfs = namespaces.byUri('http://www.w3.org/2000/01/rdf-schema#')
-
-    const getBooleanValueFromRoot = (node: any, childName: string, defaultValue: boolean = false): boolean => {
-        let childNode = node[childName]
-        if (childNode && childNode["#text"] !== undefined) {
-            if (childNode["@"][`${nsRdf}:datatype`] !== "http://www.w3.org/2001/XMLSchema#boolean") {
-                console.warn(`Unexpected datatype for a boolean: ${JSON.stringify(childNode, null, 2)}`)
-            }
-            return childNode["#text"]
-        }
-        return defaultValue
-    }
-
-    const getIntegerValueFromRoot = (node: any, childName: string, defaultValue: number = 0): number => {
-        let childNode = node[childName]
-        if (childNode && childNode["#text"] !== undefined) {
-            if (childNode["@"][`${nsRdf}:datatype`] !== "http://www.w3.org/2001/XMLSchema#int") {
-                console.warn(`Unexpected rdf:datatype for an integer: ${JSON.stringify(childNode, null, 2)}`)
-            }
-            return childNode["#text"]
-        }
-        return defaultValue
-    }
-
-    const getStringValueFromRoot = (node: any, childName: string): string|undefined => {
-        let childNode = node[childName]
-        if (childNode && typeof(childNode) === 'string') return childNode.trim()
-        return undefined
-    }
-
-    let listedLicense = root[`${nsSpdx}:ListedLicense`]
-    let licenseId = getStringValueFromRoot(listedLicense, `${nsSpdx}:licenseId`)
-    let isOsiApproved = getBooleanValueFromRoot(listedLicense, `${nsSpdx}:isOsiApproved`)
-    let isFsfLibre = getBooleanValueFromRoot(listedLicense, `${nsSpdx}:isFsfLibre`)
-    let isDeprecatedLicenseId = getBooleanValueFromRoot(listedLicense, `${nsSpdx}:isDeprecatedLicenseId`)
-    let name = getStringValueFromRoot(listedLicense, `${nsSpdx}:name`)
-    let standardLicenseHeader = getStringValueFromRoot(listedLicense, `${nsSpdx}:standardLicenseHeader`)
-    let standardLicenseHeaderHtml = getStringValueFromRoot(listedLicense, `${nsSpdx}:standardLicenseHeaderHtml`)
-    let standardLicenseHeaderTemplate = getStringValueFromRoot(listedLicense, `${nsSpdx}:standardLicenseHeaderTemplate`)
-    let standardLicenseTemplate = getStringValueFromRoot(listedLicense, `${nsSpdx}:standardLicenseTemplate`)
-    let licenseText = getStringValueFromRoot(listedLicense, `${nsSpdx}:licenseText`)
-    let licenseTextHtml = getStringValueFromRoot(listedLicense, `${nsSpdx}:licenseTextHtml`)
-
-    let seeAlso = listedLicense[`${nsRdfs}:seeAlso`]
-    if (seeAlso === undefined) {
-        seeAlso = []
-    } else if (!Array.isArray(seeAlso)) {
-        seeAlso = typeof(seeAlso) === 'string' ? [ seeAlso ] : []
-    }
-
-    const mapCrossRef = (node: any): any => {
-        let element = node[`${nsSpdx}:CrossRef`]
-        let order = getIntegerValueFromRoot(element, `${nsSpdx}:order`)
-        let match = getBooleanValueFromRoot(element, `${nsSpdx}:match`).toString()
-        let url = getStringValueFromRoot(element, `${nsSpdx}:url`)
-        let isValid = getBooleanValueFromRoot(element, `${nsSpdx}:isValid`)
-        let isLive = getBooleanValueFromRoot(element, `${nsSpdx}:isLive`)
-        let isWayBackLink = getBooleanValueFromRoot(element, `${nsSpdx}:isWayBackLink`)
-        let timestamp = getStringValueFromRoot(element, `${nsSpdx}:timestamp`)
-        return { order, match, url, isValid, isLive, isWayBackLink, timestamp }
-    }
-    let crossRef = listedLicense[`${nsSpdx}:crossRef`]
-    if (crossRef === undefined) {
-        crossRef = []
-    } else if (Array.isArray(crossRef)) {
-        crossRef = crossRef.map(mapCrossRef)
-    } else if (typeof(crossRef) === 'object') {
-        crossRef = [ mapCrossRef(crossRef) ]
-    }
-    const jsonizedLicenseObject = {
-        isDeprecatedLicenseId,
-        isFsfLibre,
-        licenseText,
-        standardLicenseHeaderTemplate,
-        standardLicenseTemplate,
-        name,
-        licenseId,
-        standardLicenseHeader,
-        crossRef,
-        seeAlso,
-        isOsiApproved,
-        licenseTextHtml,
-        standardLicenseHeaderHtml
-    }
-    return jsonizedLicenseObject
 }
 
 function sliceIntoChunks<T>(arr: T[], chunkSize: number): T[][] {
@@ -311,7 +197,8 @@ const updateExceptionsFileAt = async (exceptionsFilePath: string, licensesFilePa
                 name: entry.name,
                 licenseExceptionId: entry.licenseExceptionId,
                 licenseExceptionText: entry.licenseExceptionText,
-                licenseExceptionTemplate: entry.licenseExceptionTemplate
+                licenseExceptionTemplate: entry.licenseExceptionTemplate,
+                isDeprecated: !!entry.isDeprecatedLicenseId,
             }
         }
     }

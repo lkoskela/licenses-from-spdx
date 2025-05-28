@@ -13,7 +13,7 @@ describe('Smoke Test', () => {
         const folder = mkdtempSync(join(tmpdir(), 'foo-'))
         licensesFilePath = join(folder, 'licenses.json')
         exceptionsFilePath = join(folder, 'exceptions.json')
-
+        console.log(`Generating license data at ${licensesFilePath} and license exception data at ${exceptionsFilePath}`)
         generatedData = await generateLicenseData(licensesFilePath, exceptionsFilePath)
     }, 60000)
 
