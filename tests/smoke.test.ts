@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { generateLicenseData, GeneratedLicenseData, License, Exception } from "../src/index";
-import { isDeepStrictEqual } from "util";
+
 
 describe("Smoke Test", () => {
     let licensesFilePath: string;
