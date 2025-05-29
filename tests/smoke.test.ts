@@ -3,7 +3,6 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { generateLicenseData, GeneratedLicenseData, License, Exception } from "../src/index";
 
-
 describe("Smoke Test", () => {
     let licensesFilePath: string;
     let exceptionsFilePath: string;
@@ -14,9 +13,9 @@ describe("Smoke Test", () => {
         licensesFilePath = join(folder, "licenses.json");
         exceptionsFilePath = join(folder, "exceptions.json");
         console.log(
-            `Generating license data at ${licensesFilePath} and license exception data at ${exceptionsFilePath}`
+            `Generating license data for tests at ${licensesFilePath} and license exception data at ${exceptionsFilePath}`
         );
-        generatedData = await generateLicenseData(licensesFilePath, exceptionsFilePath, true);
+        generatedData = await generateLicenseData(licensesFilePath, exceptionsFilePath);
     }, 60000);
 
     describe("Generated files", () => {
@@ -32,7 +31,7 @@ describe("Smoke Test", () => {
             expect(zeroBsd).toBeDefined();
         });
 
-        it("should contain Autoconf-exception-2.0 (from JSON)", () => {
+        it("should contain Autoconf-exception-2.0", () => {
             const exceptions = JSON.parse(readFileSync(exceptionsFilePath).toString());
             expect(Array.isArray(exceptions.exceptions)).toBe(true);
             const autoconfException = exceptions.exceptions.find(
@@ -43,11 +42,11 @@ describe("Smoke Test", () => {
                 name: "Autoconf exception 2.0",
                 licenseExceptionId: "Autoconf-exception-2.0",
                 isDeprecated: false,
-                source: "https://spdx.org/licenses/Autoconf-exception-2.0.json",
+                source: "https://raw.githubusercontent.com/spdx/license-list-data/refs/heads/main/rdfxml/licenses.rdf",
             });
         });
 
-        it("should contain polyparse-exception (from RDF fallback)", () => {
+        it("should contain polyparse-exception", () => {
             const exceptions = JSON.parse(readFileSync(exceptionsFilePath).toString());
             expect(Array.isArray(exceptions.exceptions)).toBe(true);
             const polyparseException = exceptions.exceptions.find(
@@ -58,7 +57,25 @@ describe("Smoke Test", () => {
                 name: "Polyparse Exception",
                 licenseExceptionId: "polyparse-exception",
                 isDeprecated: false,
-                source: "https://raw.githubusercontent.com/spdx/license-list-data/main/rdfxml/polyparse-exception.rdf",
+                source: "https://raw.githubusercontent.com/spdx/license-list-data/refs/heads/main/rdfxml/licenses.rdf",
+            });
+        });
+
+        it("should contain LZMA-SDK-9.22", () => {
+            const licenses = JSON.parse(readFileSync(licensesFilePath).toString());
+            const lzmaSdk = licenses.licenses.find((license: License) => license.licenseId === "LZMA-SDK-9.22");
+            expect(lzmaSdk).toBeDefined();
+            expect(lzmaSdk.licenseComments).toBeDefined();
+            expect(lzmaSdk.licenseComments.trim().length).toBeGreaterThan(0);
+            expect(lzmaSdk).toMatchObject({
+                licenseId: "LZMA-SDK-9.22",
+                name: "LZMA SDK License (versions 9.22 and beyond)",
+                isDeprecated: false,
+                seeAlso: [
+                    "https://www.7-zip.org/sdk.html",
+                    "https://sourceforge.net/projects/sevenzip/files/LZMA%20SDK/",
+                ],
+                source: "https://raw.githubusercontent.com/spdx/license-list-data/refs/heads/main/rdfxml/licenses.rdf",
             });
         });
     });

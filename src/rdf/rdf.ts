@@ -1,88 +1,11 @@
-type NamespaceMappings = {
-    [name: string]: string;
-};
+import { Namespaces } from "../xml/xml";
+import { getBooleanValueFromRoot, getIntegerValueFromRoot, getStringValueFromRoot } from "./extractors";
 
-type Namespaces = {
-    byUri(uri: string): string;
-};
+export function convertSpdxLicenseXmlToJsonObject(licenseId: string, listedLicense: any, namespaces: Namespaces): any {
+    const nsRdf = namespaces.byUri("http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+    const nsSpdx = namespaces.byUri("http://spdx.org/rdf/terms#");
+    const nsRdfs = namespaces.byUri("http://www.w3.org/2000/01/rdf-schema#");
 
-const parseNamespaces = (mappings: NamespaceMappings | undefined): Namespaces => {
-    const keyedByPrefix: { [name: string]: string } = {};
-    const keyedByURI: { [name: string]: string } = {};
-    if (mappings) {
-        Object.keys(mappings).forEach((ns) => {
-            let prefix = ns.replace(/^xmlns:/, "");
-            let uri = mappings[ns];
-            keyedByPrefix[prefix] = uri;
-            keyedByURI[uri] = prefix;
-        });
-    }
-    const byUri = (uri: string): string => {
-        return keyedByURI[uri] || "";
-    };
-    return { byUri };
-};
-
-const getBooleanValueFromRoot = (
-    node: any,
-    nsRdf: string,
-    childName: string,
-    defaultValue: boolean = false
-): boolean => {
-    let childNode = node[childName];
-    if (childNode && childNode["#text"] !== undefined) {
-        if (childNode["@"][`${nsRdf}:datatype`] !== "http://www.w3.org/2001/XMLSchema#boolean") {
-            console.warn(`Unexpected datatype for a boolean: ${JSON.stringify(childNode, null, 2)}`);
-        }
-        return childNode["#text"];
-    }
-    return defaultValue;
-};
-
-const getIntegerValueFromRoot = (node: any, nsRdf: string, childName: string, defaultValue: number = 0): number => {
-    let childNode = node[childName];
-    if (childNode && childNode["#text"] !== undefined) {
-        if (childNode["@"][`${nsRdf}:datatype`] !== "http://www.w3.org/2001/XMLSchema#int") {
-            console.warn(`Unexpected rdf:datatype for an integer: ${JSON.stringify(childNode, null, 2)}`);
-        }
-        return childNode["#text"];
-    }
-    return defaultValue;
-};
-
-const getStringValueFromRoot = (node: any, nsRdf: string, childName: string): string | undefined => {
-    let childNode = node[childName];
-    if (childNode && typeof childNode === "string") return childNode.trim();
-    return undefined;
-};
-
-export function convertSpdxXmlToJsonObject(doc: any, licenseId: string): any {
-    let root = doc[Object.keys(doc)[0]];
-    let namespaces = parseNamespaces(root["@"]);
-    let nsRdf = namespaces.byUri("http://www.w3.org/1999/02/22-rdf-syntax-ns#");
-    let nsSpdx = namespaces.byUri("http://spdx.org/rdf/terms#");
-    let nsRdfs = namespaces.byUri("http://www.w3.org/2000/01/rdf-schema#");
-
-    let listedLicense = root[`${nsSpdx}:ListedLicense`];
-    if (listedLicense) {
-        return convertSpdxLicenseXmlToJsonObject(licenseId, listedLicense, nsRdf, nsSpdx, nsRdfs);
-    }
-
-    let listedLicenseException = root[`${nsSpdx}:ListedLicenseException`];
-    if (listedLicenseException) {
-        return convertSpdxLicenseExceptionXmlToJsonObject(licenseId, listedLicenseException, nsRdf, nsSpdx, nsRdfs);
-    }
-
-    return undefined;
-}
-
-function convertSpdxLicenseXmlToJsonObject(
-    licenseId: string,
-    listedLicense: any,
-    nsRdf: string,
-    nsSpdx: string,
-    nsRdfs: string
-): any {
     licenseId = getStringValueFromRoot(listedLicense, nsRdf, `${nsSpdx}:licenseId`) || licenseId;
     let isOsiApproved = getBooleanValueFromRoot(listedLicense, nsRdf, `${nsSpdx}:isOsiApproved`);
     let isFsfLibre = getBooleanValueFromRoot(listedLicense, nsRdf, `${nsSpdx}:isFsfLibre`);
@@ -98,6 +21,7 @@ function convertSpdxLicenseXmlToJsonObject(
     let standardLicenseTemplate = getStringValueFromRoot(listedLicense, nsRdf, `${nsSpdx}:standardLicenseTemplate`);
     let licenseText = getStringValueFromRoot(listedLicense, nsRdf, `${nsSpdx}:licenseText`);
     let licenseTextHtml = getStringValueFromRoot(listedLicense, nsRdf, `${nsSpdx}:licenseTextHtml`);
+    let licenseComments = getStringValueFromRoot(listedLicense, nsRdf, `${nsRdfs}:comment`);
 
     let seeAlso = listedLicense[`${nsRdfs}:seeAlso`];
     if (seeAlso === undefined) {
@@ -129,6 +53,7 @@ function convertSpdxLicenseXmlToJsonObject(
         isDeprecatedLicenseId,
         isFsfLibre,
         licenseText,
+        licenseComments,
         standardLicenseHeaderTemplate,
         standardLicenseTemplate,
         name,
@@ -143,13 +68,15 @@ function convertSpdxLicenseXmlToJsonObject(
     return jsonizedLicenseObject;
 }
 
-function convertSpdxLicenseExceptionXmlToJsonObject(
+export function convertSpdxLicenseExceptionXmlToJsonObject(
     licenseExceptionId: string,
     listedLicenseException: any,
-    nsRdf: string,
-    nsSpdx: string,
-    nsRdfs: string
+    namespaces: Namespaces
 ): any {
+    const nsRdf = namespaces.byUri("http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+    const nsSpdx = namespaces.byUri("http://spdx.org/rdf/terms#");
+    const nsRdfs = namespaces.byUri("http://www.w3.org/2000/01/rdf-schema#");
+
     licenseExceptionId =
         getStringValueFromRoot(listedLicenseException, nsRdf, `${nsSpdx}:licenseExceptionId`) || licenseExceptionId;
     let name = getStringValueFromRoot(listedLicenseException, nsRdf, `${nsSpdx}:name`);
@@ -160,6 +87,8 @@ function convertSpdxLicenseExceptionXmlToJsonObject(
         nsRdf,
         `${nsSpdx}:licenseExceptionTemplate`
     );
+    let licenseComments = getStringValueFromRoot(listedLicenseException, nsRdf, `${nsRdfs}:comment`);
+
     let isDeprecatedLicenseId = getBooleanValueFromRoot(
         listedLicenseException,
         nsRdf,
@@ -198,6 +127,7 @@ function convertSpdxLicenseExceptionXmlToJsonObject(
         licenseExceptionText,
         licenseExceptionTextHtml,
         licenseExceptionTemplate,
+        licenseComments,
         isDeprecatedLicenseId,
         crossRef,
         seeAlso,

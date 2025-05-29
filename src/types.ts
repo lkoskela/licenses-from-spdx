@@ -1,8 +1,12 @@
 export type Exception = {
+    name: string,
     licenseExceptionId: string,
     licenseExceptionText: string,
     licenseExceptionTemplate: string,
-    name: string
+    licenseComments?: string,
+    isDeprecated?: boolean,
+    source?: string,
+    relatedLicenses?: string[],
 }
 
 export type License = {

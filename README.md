@@ -130,7 +130,7 @@ Generate the SPDX license and exception files:
    ```js
    import { generateLicenseData } from 'licenses-from-spdx'
 
-   const { licenses, exceptions } = generateLicenseData('./licenses.json', './exceptions.json')
+   const { licenses, exceptions } = await generateLicenseData('./licenses.json', './exceptions.json')
    ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>

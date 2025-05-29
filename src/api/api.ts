@@ -1,284 +1,175 @@
-import { createHash } from "crypto";
-import { pipeline } from "stream";
 import * as path from "path";
-import { get } from "https";
-import { readFileSync, writeFileSync, createWriteStream, existsSync, mkdirSync } from "fs";
-import { tmpdir } from "os";
-import { Exceptions, Licenses } from "../types";
+import { writeFileSync, existsSync, mkdirSync } from "fs";
+import { Exception, Exceptions, License, Licenses } from "../types";
 import { readFileAsString, fileIsOlderThan, fileIsValidJson } from "../utils/file-utils";
-import { convertSpdxXmlToJsonObject } from "../rdf/rdf";
-import { parseXML } from "../xml/xml";
+import { convertSpdxLicenseExceptionXmlToJsonObject, convertSpdxLicenseXmlToJsonObject } from "../rdf/rdf";
+import { getStringAttribute } from "../rdf/extractors";
+import { parseDownloadedXML, Namespaces } from "../xml/xml";
+import { downloadRawContentFrom } from "../utils/download";
+import { hash } from "../utils/hash";
 
-const LICENSE_FILE_URL = "https://raw.githubusercontent.com/spdx/license-list-data/master/json/licenses.json";
-const EXCEPTIONS_FILE_URL = "https://raw.githubusercontent.com/spdx/license-list-data/master/json/exceptions.json";
-const EXCEPTION_DETAILS_FILE_BASEURL =
-    "https://raw.githubusercontent.com/spdx/license-list-data/master/json/exceptions/";
-const DETAILS_DOWNLOAD_BATCH_SIZE = 10;
-
-const hash = (str: string): string => {
-    let shasum = createHash("sha1");
-    shasum.update(str);
-    return shasum.digest("hex");
-};
-
-export function resolveRdfFallbackForUrl(url: string): { url: string; licenseId: string } | undefined {
-    let licenseId = url.match(/https:\/\/spdx.org\/licenses\/(.*?).json/)?.[1];
-    if (licenseId) {
-        return {
-            url: `https://raw.githubusercontent.com/spdx/license-list-data/main/rdfxml/${licenseId}.rdf`,
-            licenseId: licenseId,
-        };
-    }
-    return undefined;
-}
-
-export async function attemptXmlRdfFallback(url: string): Promise<any> {
-    const fallback = resolveRdfFallbackForUrl(url);
-    if (fallback) {
-        console.debug(`Found ${fallback.url} as fallback for ${url}`);
-        try {
-            let xmlDoc = await downloadAndParseXML(fallback.url, false);
-            const obj = convertSpdxXmlToJsonObject(xmlDoc, fallback.licenseId);
-            obj.source = fallback.url;
-            return obj;
-        } catch (err: any) {
-            console.debug(`Could not find XML/RDF fallback for ${url} at ${fallback.url}: ${err}`, err.stack);
-            return Promise.reject(`Could not find ${fallback.url} either as a fallback for ${url}`);
-        }
-    }
-    return Promise.reject(`Don't know where to look for an XML/RDF fallback for ${url}`);
-}
-
-const downloadJSON = async (url: string): Promise<any> => {
-    const rawJson = await downloadRawContentFrom(url);
-    try {
-        const obj = JSON.parse(rawJson);
-        obj.source = url;
-        return obj;
-    } catch (err) {
-        // Since the SPDX project's data is often messed up such that a given license's JSON file is missing
-        // even though the equivalent XML source file exists, let's fall back to downloading and parsing the
-        // XML file is it exists.
-        return attemptXmlRdfFallback(url).catch(() => {
-            const errorPayload = {
-                error: `Error parsing JSON from ${url}: ${err}`,
-                details: `Raw content received:\n${rawJson}`,
-            };
-            console.error(`${errorPayload.error}\n\n${errorPayload.details}`);
-            return errorPayload;
-        });
-    }
-};
-
-const downloadRawContentFrom = async (url: string): Promise<any> => {
-    const rawContent = await new Promise<string>((resolve, _reject) => {
-        const tmpFilePath = path.join(tmpdir(), hash(url));
-        get(url, { agent: false }, (response) => {
-            const callback = (err: NodeJS.ErrnoException | null) => {
-                if (err) {
-                    console.warn(`Could not download content from ${url} - ${err}`);
-                    resolve("{}");
-                } else {
-                    resolve(readFileSync(tmpFilePath).toString());
-                }
-                response.destroy();
-            };
-            pipeline(response, createWriteStream(tmpFilePath), callback);
-        });
-    });
-    return rawContent;
-};
-
-export async function downloadAndParseXML(url: string, preserveOrder: boolean = true): Promise<any> {
-    const rawXml = await downloadRawContentFrom(url);
-    try {
-        return parseXML(rawXml, preserveOrder);
-    } catch (err) {
-        console.error(`Error parsing XML from ${url}: ${err}\n\nRaw content:\n${rawXml}`);
-        return Promise.reject({
-            error: `Error parsing XML from ${url}: ${err}`,
-            details: `Raw content received:\n${rawXml}`,
-        });
-    }
-}
-
-function sliceIntoChunks<T>(arr: T[], chunkSize: number): T[][] {
-    const res: T[][] = [];
-    for (let i = 0; i < arr.length; i += chunkSize) {
-        const chunk: T[] = arr.slice(i, i + chunkSize);
-        res.push(chunk);
-    }
-    return res;
-}
-
-const downloadManyJSONFiles = async (arrayOfURLs: string[]): Promise<any[]> => {
-    const batches = sliceIntoChunks(arrayOfURLs, DETAILS_DOWNLOAD_BATCH_SIZE);
-    const results: any[] = [];
-    for (let b = 0; b < batches.length; b++) {
-        const batch = batches[b];
-        const batchResults = await Promise.all(batch.map(downloadJSON));
-        batchResults.forEach((result) => results.push(result));
-    }
-    return results;
-};
-
-const readLicenseListVersionFromJsonObject = (jsonObj: any): string => jsonObj.licenseListVersion;
-
-const readLicensesFromFile = (file_path: string): any[] => {
-    if (existsSync(file_path) && fileIsValidJson(file_path)) {
-        const jsonObj = JSON.parse(readFileSync(file_path).toString());
-        return jsonObj.licenses.filter((x: any) => !!x);
-    }
-    console.warn(`File ${file_path} does not exist - can't read licenses from it`);
-    return [];
-};
-
-const readLicenseListVersionFromFile = (file_path: string): string => {
-    if (existsSync(file_path) && fileIsValidJson(file_path)) {
-        const jsonObj = JSON.parse(readFileSync(file_path).toString());
-        return readLicenseListVersionFromJsonObject(jsonObj);
-    }
-    return "";
-};
-
-const updateFileFromURL = async (
-    destinationFilePath: string,
-    sourceUrl: string,
-    entryListKey: string,
-    detailsUrlMapper: (obj: any) => string,
-    detailsObjectMapper: (obj: any) => any
-) => {
-    const json = await downloadJSON(sourceUrl);
-    const latestVersion = readLicenseListVersionFromJsonObject(json);
-    const localVersion = readLicenseListVersionFromFile(destinationFilePath);
-    if (!!latestVersion && latestVersion === localVersion) {
-        console.log(`${destinationFilePath} already has version ${latestVersion} from ${sourceUrl} --> skip update`);
-    } else {
-        console.log(`Update available (from ${localVersion} to ${latestVersion}) --> updating ${entryListKey}`);
-        const urls = json[entryListKey].map(detailsUrlMapper) as string[];
-        const details = await downloadManyJSONFiles(urls);
-        json[entryListKey] = details.filter((x) => !!x && !x.error).map(detailsObjectMapper);
-        const str = JSON.stringify(json, null, 2).replace(/[^\x00-\x7F]/g, ""); // Throw unwanted characters away
-        mkdirSync(path.dirname(destinationFilePath), { recursive: true });
-        writeFileSync(destinationFilePath, str, { encoding: "utf8" });
-        console.log(`Updated ${destinationFilePath} with version ${latestVersion} from ${sourceUrl}`);
-    }
-};
-
-const updateLicenseFileAt = async (destinationFilePath: string, excludeText: boolean) => {
-    const licenseDetailsUrlMapper = (license: any) => license.detailsUrl;
-    const licenseDetailsObjectMapper = (license: any) => {
-        if (license && license.licenseId) {
-            return {
-                name: license.name,
-                licenseId: license.licenseId,
-                licenseText: excludeText ? undefined : license.licenseText,
-                isDeprecated: !!license.isDeprecatedLicenseId,
-                seeAlso: license.seeAlso || [],
-            };
-        }
-        return undefined;
-    };
-    try {
-        await updateFileFromURL(
-            destinationFilePath,
-            LICENSE_FILE_URL,
-            "licenses",
-            licenseDetailsUrlMapper,
-            licenseDetailsObjectMapper
-        );
-    } catch (err) {
-        console.error(`Updating ${destinationFilePath} failed: ${err}`, err);
-    }
-};
-
-const updateExceptionsFileAt = async (exceptionsFilePath: string, licensesFilePath: string, excludeText: boolean) => {
-    const exceptionDetailsUrlMapper = (entry: any) => {
-        if (
-            (entry.detailsUrl?.startsWith("https://") || entry.detailsUrl?.startsWith("http://")) &&
-            entry.detailsUrl?.endsWith(".json")
-        ) {
-            return entry.detailsUrl;
-        } else if (entry.licenseExceptionId) {
-            return EXCEPTION_DETAILS_FILE_BASEURL + entry.licenseExceptionId + ".json";
-        } else if (entry.reference?.startsWith("/")) {
-            const base = EXCEPTION_DETAILS_FILE_BASEURL + entry.reference.replace(/^.\//, "");
-            const suffix = base.endsWith(".json") ? "" : ".json";
-            return base + suffix;
-        }
-        throw new Error(
-            `Unexpected entry object for updateExceptionsFileAt/exceptionDetailsUrlMapper: ${JSON.stringify(
-                entry,
-                null,
-                2
-            )}`
-        );
-    };
-    const exceptionDetailsObjectMapper = (_licenses: any[]) => {
-        return (entry: any) => {
-            return {
-                name: entry.name,
-                licenseExceptionId: entry.licenseExceptionId,
-                licenseExceptionText: excludeText ? undefined : entry.licenseExceptionText,
-                licenseExceptionTemplate: excludeText ? undefined : entry.licenseExceptionTemplate,
-                isDeprecated: !!entry.isDeprecatedLicenseId,
-                source: entry.source,
-            };
-        };
-    };
-    try {
-        const licenses = readLicensesFromFile(licensesFilePath);
-        await updateFileFromURL(
-            exceptionsFilePath,
-            EXCEPTIONS_FILE_URL,
-            "exceptions",
-            exceptionDetailsUrlMapper,
-            exceptionDetailsObjectMapper(licenses)
-        );
-    } catch (err) {
-        console.error(`Updating ${exceptionsFilePath} failed: ${err}`, err);
-    }
-};
-
-const updateLicenseFileIfOlderThan = async (oldestAcceptableTimestamp: Date, filePath: string, excludeText: boolean) => {
-    if (!existsSync(filePath) || fileIsOlderThan(oldestAcceptableTimestamp, filePath) || !fileIsValidJson(filePath)) {
-        return await updateLicenseFileAt(filePath, excludeText);
-    } else {
-        console.log(`Not updating ${filePath} (it's recent enough)`);
-    }
-};
-
-const updateExceptionsFileIfOlderThan = async (
-    oldestAcceptableTimestamp: Date,
-    filePath: string,
-    licenseFilePath: string,
-    excludeText: boolean
-) => {
-    if (!existsSync(filePath) || fileIsOlderThan(oldestAcceptableTimestamp, filePath) || !fileIsValidJson(filePath)) {
-        return await updateExceptionsFileAt(filePath, licenseFilePath, excludeText);
-    } else {
-        console.log(`Not updating ${filePath} (it's recent enough)`);
-    }
-};
-
-const dateHoursBeforeNow = (hours: number): Date => {
-    const d = new Date();
-    const nowInMillis = d.getTime();
-    return new Date(nowInMillis - hours * 60 * 60 * 1000);
-};
-
-const main = async (licenseFilePath: string, exceptionsFilePath: string, excludeText: boolean) => {
-    const oldestAcceptableTimestamp = dateHoursBeforeNow(24);
-    await updateLicenseFileIfOlderThan(oldestAcceptableTimestamp, licenseFilePath, excludeText);
-    await updateExceptionsFileIfOlderThan(oldestAcceptableTimestamp, exceptionsFilePath, licenseFilePath, excludeText);
-};
+export { Exception, License, Exceptions, Licenses };
 
 export type GeneratedLicenseData = {
     licenses: Licenses;
     exceptions: Exceptions;
 };
 
-export { Licenses, Exceptions };
+const SPDX_LICENSES_RDF_URL =
+    "https://raw.githubusercontent.com/spdx/license-list-data/refs/heads/main/rdfxml/licenses.rdf";
+
+function calculateVersionHash(...data: any[]): string {
+    const str = data.reduce((acc, x) => acc + "#" + JSON.stringify(x));
+    return hash(str).slice(0, 8);
+}
+
+function licenseDetailsObjectMapper(options: GenerateLicenseDataOptions, source: string) {
+    return (entry: any) => {
+        if (entry && entry.licenseId) {
+            return {
+                name: entry.name,
+                licenseId: entry.licenseId,
+                licenseText: options.excludeText ? undefined : entry.licenseText,
+                licenseComments: options.excludeComments ? undefined : entry.licenseComments,
+                isDeprecated: !!entry.isDeprecatedLicenseId,
+                seeAlso: entry.seeAlso || [],
+                source: source,
+            };
+        }
+        return undefined;
+    };
+}
+
+function exceptionDetailsObjectMapper(options: GenerateLicenseDataOptions, source: string) {
+    return (entry: any) => {
+        return {
+            name: entry.name,
+            licenseExceptionId: entry.licenseExceptionId,
+            licenseExceptionText: options.excludeText ? undefined : entry.licenseExceptionText,
+            licenseExceptionTemplate: options.excludeTemplates ? undefined : entry.licenseExceptionTemplate,
+            licenseComments: options.excludeComments ? undefined : entry.licenseComments,
+            isDeprecated: !!entry.isDeprecatedLicenseId,
+            source: source,
+        };
+    };
+}
+
+function needsUpdate(filePath: string, oldestAcceptableTimestamp: Date): boolean {
+    return !existsSync(filePath) || fileIsOlderThan(oldestAcceptableTimestamp, filePath) || !fileIsValidJson(filePath);
+}
+
+async function update(licenseFilePath: string, exceptionsFilePath: string, options: GenerateLicenseDataOptions) {
+    const rawXml = await downloadRawContentFrom(SPDX_LICENSES_RDF_URL);
+    if (options.verbose) {
+        console.log(`Downloaded SPDX licenses RDF from ${SPDX_LICENSES_RDF_URL}`);
+    }
+
+    const { root, namespaces } = await parseDownloadedXML(rawXml, SPDX_LICENSES_RDF_URL, false);
+    const nsSpdx = namespaces.byUri("http://spdx.org/rdf/terms#");
+
+    const licenses = root[`${nsSpdx}:ListedLicense`]
+        .map((x: any) => parseListedLicense(x, namespaces))
+        .map(licenseDetailsObjectMapper(options, SPDX_LICENSES_RDF_URL))
+        .sort((a: License, b: License) => a.licenseId.localeCompare(b.licenseId));
+
+    const exceptions = root[`${nsSpdx}:ListedLicenseException`]
+        .map((x: any) => parseListedLicenseException(x, namespaces))
+        .map(exceptionDetailsObjectMapper(options, SPDX_LICENSES_RDF_URL))
+        .sort((a: Exception, b: Exception) => a.licenseExceptionId.localeCompare(b.licenseExceptionId));
+
+    const version = calculateVersionHash(licenses, exceptions);
+    const releaseDate = new Date().toISOString();
+
+    writeJsonFile(licenseFilePath, { licenses, version, releaseDate });
+    writeJsonFile(exceptionsFilePath, { exceptions, version, releaseDate });
+}
+
+function writeJsonFile(filePath: string, content: object) {
+    const serializedExceptions = JSON.stringify(content, null, 2).replace(/[^\x00-\x7F]/g, ""); // Throw unwanted characters away
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, serializedExceptions, { encoding: "utf8" });
+}
+
+function parseListedLicense(license: any, namespaces: Namespaces) {
+    const nsRdf = namespaces.byUri("http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+    const about = getStringAttribute(license, `${nsRdf}:about`);
+    const id = about?.split("/").pop();
+    if (!id) {
+        throw new Error(`Could not extract licenseId from ${JSON.stringify(about)}`);
+    }
+    return convertSpdxLicenseXmlToJsonObject(id, license, namespaces);
+}
+
+function parseListedLicenseException(exception: any, namespaces: Namespaces) {
+    const nsRdf = namespaces.byUri("http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+    const about = getStringAttribute(exception, `${nsRdf}:about`);
+    const id = about?.split("/").pop();
+    if (!id) {
+        throw new Error(`Could not extract licenseId from ${JSON.stringify(about)}`);
+    }
+    return convertSpdxLicenseExceptionXmlToJsonObject(id, exception, namespaces);
+}
+
+function dateHoursBeforeNow(hours: number): Date {
+    const d = new Date();
+    const nowInMillis = d.getTime();
+    return new Date(nowInMillis - hours * 60 * 60 * 1000);
+}
+
+async function main(licenseFile: string, exceptionsFile: string, options: ResolvedOptions) {
+    const threshold = dateHoursBeforeNow(options.updateFrequency);
+    if (needsUpdate(licenseFile, threshold) || needsUpdate(exceptionsFile, threshold)) {
+        await update(licenseFile, exceptionsFile, options);
+        if (options.verbose) {
+            console.log(`Updated license file ${licenseFile} and exceptions file ${exceptionsFile}`);
+        }
+    }
+}
+
+export type GenerateLicenseDataOptions = {
+    /**
+     * Whether to exclude the license text from the generated license data. Defaults to `false`.
+     */
+    excludeText?: boolean;
+
+    /**
+     * Whether to exclude the HTML version of license texts from the generated license data. Defaults to `true`.
+     */
+    excludeHtml?: boolean;
+
+    /**
+     * Whether to exclude template texts from the generated license data. Defaults to `true`.
+     */
+    excludeTemplates?: boolean;
+
+    /**
+     * Whether to exclude comments from the generated license data. Defaults to `false`.
+     */
+    excludeComments?: boolean;
+
+    /**
+     * Whether to print verbose output. Defaults to `false`.
+     */
+    verbose?: boolean;
+
+    /**
+     * Update frequency in hours. Defaults to `24`.
+     */
+    updateFrequency?: number;
+};
+
+type ResolvedOptions = GenerateLicenseDataOptions & {
+    updateFrequency: number;
+};
+
+const defaultOptions: ResolvedOptions = {
+    excludeComments: false,
+    excludeText: false,
+    excludeHtml: false,
+    excludeTemplates: false,
+    verbose: false,
+    updateFrequency: 24,
+};
 
 /**
  * Create or update the license data files and return the generated license data.
@@ -288,15 +179,14 @@ export { Licenses, Exceptions };
  * @param excludeText `boolean` whether to exclude the license text from the generated license data (default: false)
  * @returns `Promise` of the generated license data.
  */
-export const generateLicenseData = async (
+export async function generateLicenseData(
     pathToLicensesFile: string,
     pathToExceptionsFile: string,
-    excludeText: boolean = false
-): Promise<GeneratedLicenseData> => {
-    // TODO: should we (recursively) create the path to the licenses/exceptions file if the path doesn't exist yet?
-    await main(pathToLicensesFile, pathToExceptionsFile, excludeText);
+    options: GenerateLicenseDataOptions = {}
+): Promise<GeneratedLicenseData> {
+    await main(pathToLicensesFile, pathToExceptionsFile, { ...defaultOptions, ...options });
     return {
         licenses: JSON.parse(readFileAsString(pathToLicensesFile)),
         exceptions: JSON.parse(readFileAsString(pathToExceptionsFile)),
     };
-};
+}
