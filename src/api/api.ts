@@ -165,14 +165,14 @@ const updateFileFromURL = async (
     }
 };
 
-const updateLicenseFileAt = async (destinationFilePath: string) => {
+const updateLicenseFileAt = async (destinationFilePath: string, excludeText: boolean) => {
     const licenseDetailsUrlMapper = (license: any) => license.detailsUrl;
     const licenseDetailsObjectMapper = (license: any) => {
         if (license && license.licenseId) {
             return {
                 name: license.name,
                 licenseId: license.licenseId,
-                licenseText: license.licenseText,
+                licenseText: excludeText ? undefined : license.licenseText,
                 isDeprecated: !!license.isDeprecatedLicenseId,
                 seeAlso: license.seeAlso || [],
             };
@@ -192,7 +192,7 @@ const updateLicenseFileAt = async (destinationFilePath: string) => {
     }
 };
 
-const updateExceptionsFileAt = async (exceptionsFilePath: string, licensesFilePath: string) => {
+const updateExceptionsFileAt = async (exceptionsFilePath: string, licensesFilePath: string, excludeText: boolean) => {
     const exceptionDetailsUrlMapper = (entry: any) => {
         if (
             (entry.detailsUrl?.startsWith("https://") || entry.detailsUrl?.startsWith("http://")) &&
@@ -219,8 +219,8 @@ const updateExceptionsFileAt = async (exceptionsFilePath: string, licensesFilePa
             return {
                 name: entry.name,
                 licenseExceptionId: entry.licenseExceptionId,
-                licenseExceptionText: entry.licenseExceptionText,
-                licenseExceptionTemplate: entry.licenseExceptionTemplate,
+                licenseExceptionText: excludeText ? undefined : entry.licenseExceptionText,
+                licenseExceptionTemplate: excludeText ? undefined : entry.licenseExceptionTemplate,
                 isDeprecated: !!entry.isDeprecatedLicenseId,
                 source: entry.source,
             };
@@ -240,9 +240,9 @@ const updateExceptionsFileAt = async (exceptionsFilePath: string, licensesFilePa
     }
 };
 
-const updateLicenseFileIfOlderThan = async (oldestAcceptableTimestamp: Date, filePath: string) => {
+const updateLicenseFileIfOlderThan = async (oldestAcceptableTimestamp: Date, filePath: string, excludeText: boolean) => {
     if (!existsSync(filePath) || fileIsOlderThan(oldestAcceptableTimestamp, filePath) || !fileIsValidJson(filePath)) {
-        return await updateLicenseFileAt(filePath);
+        return await updateLicenseFileAt(filePath, excludeText);
     } else {
         console.log(`Not updating ${filePath} (it's recent enough)`);
     }
@@ -251,10 +251,11 @@ const updateLicenseFileIfOlderThan = async (oldestAcceptableTimestamp: Date, fil
 const updateExceptionsFileIfOlderThan = async (
     oldestAcceptableTimestamp: Date,
     filePath: string,
-    licenseFilePath: string
+    licenseFilePath: string,
+    excludeText: boolean
 ) => {
     if (!existsSync(filePath) || fileIsOlderThan(oldestAcceptableTimestamp, filePath) || !fileIsValidJson(filePath)) {
-        return await updateExceptionsFileAt(filePath, licenseFilePath);
+        return await updateExceptionsFileAt(filePath, licenseFilePath, excludeText);
     } else {
         console.log(`Not updating ${filePath} (it's recent enough)`);
     }
@@ -266,10 +267,10 @@ const dateHoursBeforeNow = (hours: number): Date => {
     return new Date(nowInMillis - hours * 60 * 60 * 1000);
 };
 
-const main = async (licenseFilePath: string, exceptionsFilePath: string) => {
+const main = async (licenseFilePath: string, exceptionsFilePath: string, excludeText: boolean) => {
     const oldestAcceptableTimestamp = dateHoursBeforeNow(24);
-    await updateLicenseFileIfOlderThan(oldestAcceptableTimestamp, licenseFilePath);
-    await updateExceptionsFileIfOlderThan(oldestAcceptableTimestamp, exceptionsFilePath, licenseFilePath);
+    await updateLicenseFileIfOlderThan(oldestAcceptableTimestamp, licenseFilePath, excludeText);
+    await updateExceptionsFileIfOlderThan(oldestAcceptableTimestamp, exceptionsFilePath, licenseFilePath, excludeText);
 };
 
 export type GeneratedLicenseData = {
@@ -284,14 +285,16 @@ export { Licenses, Exceptions };
  *
  * @param pathToLicensesFile `string` path to the licenses file (where it should be written if it doesn't exist yet)
  * @param pathToExceptionsFile `string` path to the exceptions file (where it should be written if it doesn't exist yet)
+ * @param excludeText `boolean` whether to exclude the license text from the generated license data (default: false)
  * @returns `Promise` of the generated license data.
  */
 export const generateLicenseData = async (
     pathToLicensesFile: string,
-    pathToExceptionsFile: string
+    pathToExceptionsFile: string,
+    excludeText: boolean = false
 ): Promise<GeneratedLicenseData> => {
     // TODO: should we (recursively) create the path to the licenses/exceptions file if the path doesn't exist yet?
-    await main(pathToLicensesFile, pathToExceptionsFile);
+    await main(pathToLicensesFile, pathToExceptionsFile, excludeText);
     return {
         licenses: JSON.parse(readFileAsString(pathToLicensesFile)),
         exceptions: JSON.parse(readFileAsString(pathToExceptionsFile)),

@@ -16,7 +16,7 @@ describe("Smoke Test", () => {
         console.log(
             `Generating license data at ${licensesFilePath} and license exception data at ${exceptionsFilePath}`
         );
-        generatedData = await generateLicenseData(licensesFilePath, exceptionsFilePath);
+        generatedData = await generateLicenseData(licensesFilePath, exceptionsFilePath, true);
     }, 60000);
 
     describe("Generated files", () => {
