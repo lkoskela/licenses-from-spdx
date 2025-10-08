@@ -185,8 +185,7 @@ export async function generateLicenseData(
     options: GenerateLicenseDataOptions = {}
 ): Promise<GeneratedLicenseData> {
     await main(pathToLicensesFile, pathToExceptionsFile, { ...defaultOptions, ...options });
-    return {
-        licenses: JSON.parse(readFileAsString(pathToLicensesFile)),
-        exceptions: JSON.parse(readFileAsString(pathToExceptionsFile)),
-    };
+    const licenses: Licenses = JSON.parse(readFileAsString(pathToLicensesFile))
+    const exceptions: Exceptions = JSON.parse(readFileAsString(pathToExceptionsFile))
+    return { licenses, exceptions };
 }
